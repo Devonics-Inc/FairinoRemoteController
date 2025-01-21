@@ -11,6 +11,7 @@ from fairino import Robot
 
 
 # CONSTANTS
+ROBOT_IP = '192.168.58.2'
 SOFT_LIMIT = [-175.0, 175.0, -265.0, 85.0, -160.0
               , 160.0, -265.0, 85.0, -175.0, 175.0, -175.0, 175.0]
 
@@ -272,16 +273,16 @@ def run(robot, robot_speed):
             if event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 0:
                     print("A Has Been Pressed")
-                    gripperOpen = toggleGripper(robot, gripperOpen)
+                    # gripperOpen = toggleGripper(robot, gripperOpen)
                 elif event.button == 1:
                     print("B Has Been Pressed")
-                    robot.MoveJ(HOME_POS, 0, 0)
+                    # robot.MoveJ(HOME_POS, 0, 0)
                     time.sleep(3)
                 elif event.button == 3:
                     print("Y Has Been Pressed")
                     ResetErrors(robot)
                 elif event.button == 2:
-                    print("X Has Been Pressed")
+                    # print("X Has Been Pressed")
                     robot.MoveJ(PACKING_POS, 0, 0)
                     time.sleep(3)
             elif event.type == pygame.JOYBUTTONUP:
@@ -357,12 +358,14 @@ def run(robot, robot_speed):
                     #mv_thread.daemon = True
                     mv_thread.start()
                 
-                elif(checkNeutralPos(joystick)):
+                elif(robot.GetRobotMotionDone() == 0 and checkNeutralPos(joystick)):
                     try:
                         robot.ImmStopJOG()
                         print("Neutral stick detected when robot is in motion")
                     except:
                         print("Error stopping robot from main loop")
+                        ResetErrors(robot)
+                        robot.ImmStopJOG()
                 time.sleep(0.006)
                 # print(straxis)
             if event.type == pygame.QUIT:
@@ -389,18 +392,19 @@ def main():
             time.sleep(0.5)
     while not robot_connected:
         try:
-            robot = Robot.RPC('192.168.58.32')
+            robot = Robot.RPC(ROBOT_IP)
             robot_connected = True
             break
         except:
             time.sleep(0.5)
             robot_connected = robot.connected
     time.sleep(3)
-    print(robot.GetGripperConfig())
+    #print(robot.GetGripperConfig())
     print(robot.SetGripperConfig(4,0,0,0))
     time.sleep(.5)
-    robot.ActGripper(1,1)
-    robot_speed = 55
+    #robot.ActGripper(1,1)
+    robot_speed = 80
+    accel = 5
     robot.SetSpeed(robot_speed)
     run_thread = Thread(target = run, args=[robot, robot_speed])
     # run_thread.daemon = True
