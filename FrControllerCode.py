@@ -5,8 +5,9 @@ from pygame import joystick
 import math
 import inputs
 import os
-os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
-sys.path.insert(0, '/Users/FrTest/Desktop/FrController')
+# Uncomment this section if you are using a BeeLink and want to run this script on start-up
+# os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+# sys.path.insert(0, '[Enter absolute path to this script here]')
 from fairino import Robot
 
 
@@ -283,7 +284,7 @@ def run(robot, robot_speed):
                     ResetErrors(robot)
                 elif event.button == 2:
                     # print("X Has Been Pressed")
-                    robot.MoveJ(PACKING_POS, 0, 0)
+                    # robot.MoveJ(PACKING_POS, 0, 0)
                     time.sleep(3)
             elif event.type == pygame.JOYBUTTONUP:
                 if event.button == 0:
