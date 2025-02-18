@@ -3,16 +3,15 @@ import time, sys, pygame
 from threading import Thread, Lock
 from pygame import joystick
 import math
-import inputs
 import os
+import inputs
 # Uncomment this section if you are using a BeeLink and want to run this script on start-up
-# os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
-# sys.path.insert(0, '[Enter absolute path to this script here]')
+os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from fairino import Robot
 
 
 # CONSTANTS
-ROBOT_IP = '192.168.58.2'
+ROBOT_IP = '192.168.57.2'
 SOFT_LIMIT = [-175.0, 175.0, -265.0, 85.0, -160.0
               , 160.0, -265.0, 85.0, -175.0, 175.0, -175.0, 175.0]
 
@@ -29,6 +28,8 @@ R_UP = "ru"
 R_DOWN = "rd"
 LT = 'lt'
 RT = 'rt'
+
+global is_moving
 
 # raspi functionality
 # PS controller
@@ -181,8 +182,9 @@ def moveAxisThread(robot, lock, joystick, mv_input):
                 print("Error in rotating joint 4")
         if(index == -1):
             return
+        
         stop_thread = Thread(target=stopAxis, args=[robot, joystick, index, lock])
-        stop_thread.daemon = True
+        # stop_thread.daemon = True
         stop_thread.start()
         time.sleep(.25)
         # robot.ImmStopJOG()
@@ -198,31 +200,37 @@ def stopAxis(robot, joystick, JSAxel_index, lock):
         # print(axel)
         if(JSAxel_index < 4):
             if abs(axel) < 0.1:
+                err = robot.ImmStopJOG()
+                print(f"Stop jog err: {err}")
+                while(err != 0):
+                    time.sleep(0.1)
+                    print("ERROR in stopping robot!!!")
+                    err = robot.ImmStopJOG()
+                return
+                """
                 try:
                     robot.ImmStopJOG()
                     print("Joystick released")
                 except:
                     print("ERROR in stopping robot!!!")
-                break
+                break"""
         else:
              if abs(axel) >= 1:
-                try:
-                    robot.ImmStopJOG()
-                    print("Joystick released")
-                except:
+                err = robot.ImmStopJOG()
+                while(err != 0):
+                    time.sleep(0.1)
                     print("ERROR in stopping robot!!!")
-                break
+                    err = robot.ImmStopJOG()
+                return
+
         if checkJointLimits(robot, lock):
-            try:
-                robot.ImmStopJOG()
-                print("Too close to soft limit")
-            except:
+            err = robot.ImmStopJOG()
+            while(err != 0):
+                time.sleep(0.1)
                 print("ERROR in stopping robot!!!")
-            break
-        if(robot.GetRobotMotionDone() == 1):
-            print("Robot done moving. Ending stopThread()")
-            break
-        time.sleep(0.008)
+                err = robot.ImmStopJOG()
+            return
+        time.sleep(0.1)
 
 def ResetErrors(robot):
     print("Error reset activated")
@@ -233,6 +241,7 @@ def ResetErrors(robot):
 
 def run(robot, robot_speed):
     gripperOpen = True
+    is_moving = False
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     screen.fill("purple")
@@ -297,6 +306,10 @@ def run(robot, robot_speed):
                     print("X Has Been Uped")
             
             elif event.type == pygame.JOYAXISMOTION:
+                if(is_moving and checkNeutralPos(joystick)):
+                    is_moving = False
+                elif(is_moving):
+                    continue
                 # joystick_s = pygame.joystick.Joystick(0)
                 axes = joystick.get_numaxes()
                 # up, left, down, right
@@ -312,62 +325,71 @@ def run(robot, robot_speed):
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_RIGHT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 if(fl_axis[0] < -.7):
                     print("L-Left")
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_LEFT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[1] > .7):
                     print('L back')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_DOWN])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[1] < -.7):
                     print('L Forward')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_UP])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[2] > 0.7):
                     print('R Right')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_RIGHT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[2] < -0.7):
                     print('R left')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_LEFT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[3] > 0.7):
                     print('R Back')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_UP])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[3] < -0.7):
                     print('R Forward')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_DOWN])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[4] > 0):
                     print('lt')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, LT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 elif(fl_axis[5] > 0):
                     print('rt')
                     # moveAxisThread(robot, lock, joystick, 'rt')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, RT])
                     #mv_thread.daemon = True
                     mv_thread.start()
+                    is_moving = True
                 
-                elif(robot.GetRobotMotionDone() == 0 and checkNeutralPos(joystick)):
-                    try:
-                        robot.ImmStopJOG()
-                        print("Neutral stick detected when robot is in motion")
-                    except:
-                        print("Error stopping robot from main loop")
-                        ResetErrors(robot)
-                        robot.ImmStopJOG()
-                time.sleep(0.006)
+                elif(is_moving and checkNeutralPos(joystick)):
+                    err = robot.ImmStopJOG()
+                    while(err != 0):
+                        time.sleep(0.1)
+                        print("ERROR in stopping robot!!!")
+                        err = robot.ImmStopJOG()
+                    is_moving = False
+                time.sleep(0.008)
                 # print(straxis)
             if event.type == pygame.QUIT:
                 running = False
