@@ -6,16 +6,21 @@ import math
 import os
 import inputs
 # Uncomment this section if you are using a BeeLink and want to run this script on start-up
-os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+#os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 from fairino import Robot
 
 
 # CONSTANTS
-ROBOT_IP = '192.168.57.2'
+ROBOT_IP = '192.168.58.2'
 SOFT_LIMIT = [-175.0, 175.0, -265.0, 85.0, -160.0
               , 160.0, -265.0, 85.0, -175.0, 175.0, -175.0, 175.0]
 
-HOME_POS = [-80, -65, -80, -130, 90, 0]
+
+
+HOME_POS = [96.617, -62.322, 57.25, -88.757, -92.273, 25.385] 
+PICK_POS = [115.0, -39.834, 56.094, -107.309, -92.277 , 25.383]
+PLACE_POS = [78.532, -39.834, 56.094, -107.309, -92.277, 25.383]
+MID_POS = [97.0, -49.834, 57.094, -107.309, -92.277, 25.383]
 
 PACKING_POS = [-125, 10, -158, -122, 0.012, 0] #Specific for FR16
 L_LEFT = 'll'
@@ -239,6 +244,12 @@ def ResetErrors(robot):
     if(err !=  0):
         print("Robot broke safety conditions. Please check WebApp for error msg")
 
+def Pick(robot):
+    robot.MoveJ(MID_POS, 0, 0)
+    time.sleep(3)
+    robot.MoveJ(PICK_POS, 0, 0)
+    time.sleep(0.5)
+
 def run(robot, robot_speed):
     gripperOpen = True
     is_moving = False
@@ -283,6 +294,8 @@ def run(robot, robot_speed):
             if event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 0:
                     print("A Has Been Pressed")
+                    Pick(robot)
+                    time.sleep(3)
                     # gripperOpen = toggleGripper(robot, gripperOpen)
                 elif event.button == 1:
                     print("B Has Been Pressed")
@@ -295,15 +308,6 @@ def run(robot, robot_speed):
                     # print("X Has Been Pressed")
                     # robot.MoveJ(PACKING_POS, 0, 0)
                     time.sleep(3)
-            elif event.type == pygame.JOYBUTTONUP:
-                if event.button == 0:
-                    print("A Has Been Uped")
-                elif event.button == 1:
-                    print("B Has Been Uped")
-                elif event.button == 3:
-                    print("Y Has Been Uped")
-                elif event.button == 2:
-                    print("X Has Been Uped")
             
             elif event.type == pygame.JOYAXISMOTION:
                 if(is_moving and checkNeutralPos(joystick)):
@@ -426,7 +430,7 @@ def main():
     print(robot.SetGripperConfig(4,0,0,0))
     time.sleep(.5)
     #robot.ActGripper(1,1)
-    robot_speed = 80
+    robot_speed = 15
     accel = 5
     robot.SetSpeed(robot_speed)
     run_thread = Thread(target = run, args=[robot, robot_speed])
