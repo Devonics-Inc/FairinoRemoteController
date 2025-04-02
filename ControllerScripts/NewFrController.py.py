@@ -1,28 +1,29 @@
-from ast import Try
+from ast import Try, TryStar
+from calendar import c
+from json import tool
 import time, sys, pygame
 from threading import Thread, Lock
 from pygame import joystick
 import math
-import os
 import inputs
-# Uncomment this section if you are using a BeeLink and want to run this script on start-up
-#os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+import os
+os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+sys.path.insert(0, '/Users/FrTest/Desktop/FrController')
 from fairino import Robot
 
+JOG_ACCL = 0
+JOG_SPEED = 20
 
 # CONSTANTS
-ROBOT_IP = '192.168.57.2'
 SOFT_LIMIT = [-175.0, 175.0, -265.0, 85.0, -160.0
               , 160.0, -265.0, 85.0, -175.0, 175.0, -175.0, 175.0]
 
+#HOME_POS = [96.617, -62.322, 57.25, -88.757, -92.273, 25.385] 
+PICK_POS = [113.0, -47.45, 57.5, -100.0, -86.5 , 21.5]
+PLACE_POS = [78.6, -56.0, 67.0, -96.5, -90.8, -16.6]
+MID_POS = [95.8, -59.5, 57.5, -88, -90, -1]
 
-
-HOME_POS = [96.617, -62.322, 57.25, -88.757, -92.273, 25.385] 
-PICK_POS = [115.0, -39.834, 56.094, -107.309, -92.277 , 25.383]
-PLACE_POS = [78.532, -39.834, 56.094, -107.309, -92.277, 25.383]
-MID_POS = [97.0, -49.834, 57.094, -107.309, -92.277, 25.383]
-
-PACKING_POS = [-125, 10, -158, -122, 0.012, 0] #Specific for FR16
+PACKING_POS = [-125, 10, -158, -122, 0.012, 0]
 L_LEFT = 'll'
 L_RIGHT = 'lr'
 L_UP = 'lu'
@@ -34,8 +35,7 @@ R_DOWN = "rd"
 LT = 'lt'
 RT = 'rt'
 
-global is_moving
-
+global inMotion
 # raspi functionality
 # PS controller
 def truncate(number):
@@ -57,25 +57,18 @@ def checkNeutralPos(joystick):
 def toggleGripper(robot, gripperOpen):
     if(gripperOpen):
         try:
-            print(robot.MoveGripper(1, 0, 80, 80, 5000,0))
+            err = robot.MoveGripper(1, 50, 50, 100, 30000,0)
+            print(err)
         except:
             print("Error opening gripper")
     else:
         try:
-            print(robot.MoveGripper(1, 100, 80, 80, 5000,0))
+            err = robot.MoveGripper(1, 100, 50, 40, 30000,0)
+            print(err)
         except:
             print("Error closing gripper")
     return not gripperOpen
 
-
-def straightenGripper(robot):
-    try:
-        e, j_pos = robot.GetActualJointPosDegree()
-        j_pos[5] = 0
-        j_pos[4] = 90
-        robot.MoveJ(j_pos, 0, 0)
-    except:
-        print("Unexpected error when straighening gripper")
         
 def moveToSafety(robot, index, joint_pos, lock):
     if joint_pos[index] < 0:
@@ -100,7 +93,7 @@ def checkJointLimits(robot, lock):
     # print("check Joint limits called")
     for i in range(len(j_pos) - 1):
         if (j_pos[i] - 5 <= SOFT_LIMIT[i*2]) or j_pos[i] + 5 >= SOFT_LIMIT[i*2 + 1]:
-            robot.ImmStopJOG()
+            robot.ServoMoveEnd()
             print(f"Joint {i}: Too close to soft limit")
             time.sleep(.5)
             moveToSafety(robot, i, j_pos, lock)
@@ -115,34 +108,42 @@ def moveAxisThread(robot, lock, joystick, mv_input):
         index = -1
         print("Move axis called")
         if(mv_input == L_LEFT):
-            err = robot.StartJOG(2, 1, 1, 200)
-            print(f"Move axis returned: {err}")
-            if(err == 0):
-                index = 0
+            try:
+                err = robot.ServoCart(2, [0.2,0.0,0.0,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(2, 1, 1, 200, vel=JOG_SPEED, acc = JOG_ACCL)
+                print(f"Move axis returned: {err}")
+                if(err == 0):
+                    index = 0
+            except:
+                print("Error sending move commands")
 
         elif(mv_input == L_RIGHT):
             try:
-                err = robot.StartJOG(2, 1, 0, 200)
+                err = robot.ServoCart(2, [-0.2,0.0,0.0,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(2, 1, 0, 200, vel=JOG_SPEED, acc = JOG_ACCL)
                 print(f"Move axis returned: {err}")
                 if(err == 0):
                     index = 0
             except:
                 print("Error sending move commands")
         elif(mv_input == L_DOWN):
-            err = robot.StartJOG(2, 2, 1, 200)
+            err = robot.ServoCart(2, [0.0,0.2,0.0,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+            #err = robot.StartJOG(2, 2, 1, 200, vel=JOG_SPEED, acc =  JOG_ACCL)
             print(f"Move axis returned: {err}")
             if(err == 0):
                 index = 1
 
         elif(mv_input == L_UP):
-            err = robot.StartJOG(2, 2, 0, 200)
+            err = robot.ServoCart(2, [0.0,-0.2,0.0,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+            #err = robot.StartJOG(2, 2, 0, 200, vel=JOG_SPEED, acc =  JOG_ACCL)
             print(f"Move axis returned: {err}")
             if err == 0:
                 index = 1
 
         elif(mv_input == R_UP):
             try:
-                err = robot.StartJOG(2, 3, 0, 200)
+                err = robot.ServoCart(2, [0.0,0.0,0.2,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(2, 3, 0, 200, vel=JOG_SPEED, acc =  JOG_ACCL)
                 print(f"Move axis returned: {err}")
                 if err == 0:
                     index = 3
@@ -150,21 +151,24 @@ def moveAxisThread(robot, lock, joystick, mv_input):
                 print("Error in vertical jog")
 
         elif(mv_input == R_DOWN):
-            err = robot.StartJOG(2, 3, 1, 200)
+            err = robot.ServoCart(2, [0.0,0.0,-0.2,0.0,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+            #err = robot.StartJOG(2, 3, 1, 200, vel=JOG_SPEED, acc =  JOG_ACCL)
             print(f"Move axis returned: {err}")
             if err == 0:
                 index = 3
 
         elif(mv_input == R_RIGHT):
             try:
-                err = robot.StartJOG(0, 5, 0, 180)
+                err = robot.ServoCart(2, [0.0,0.0,0.0,0.0,0.2,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(0, 5, 0, 180, vel=JOG_SPEED, acc =  JOG_ACCL)
                 if err == 0:
                     index = 2
             except:
                 print("Error rotating end tool")
         elif(mv_input == R_LEFT):
             try:
-                err = robot.StartJOG(0, 5, 1, 180)
+                err = robot.ServoCart(2, [0.0,0.0,0.0,0.0,-0.2,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(0, 5, 1, 180, vel=JOG_SPEED, acc = JOG_ACCL)
                 if err == 0:
                     index = 2
             except:
@@ -172,7 +176,8 @@ def moveAxisThread(robot, lock, joystick, mv_input):
 
         elif(mv_input == LT):
             try:
-                err = robot.StartJOG(0, 4, 1, 180)
+                err = robot.ServoCart(2, [0.0,0.0,0.0,0.2,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(0, 4, 1, 180, vel=JOG_SPEED, acc =  JOG_ACCL)
                 if err == 0:
                     index = 4
             except:
@@ -180,19 +185,18 @@ def moveAxisThread(robot, lock, joystick, mv_input):
 
         elif(mv_input == RT):
             try:
-                err = robot.StartJOG(0, 4, 0, 180)
+                err = robot.ServoCart(2, [0.0,0.0,0.0,-0.2,0.0,0.0], vel=JOG_SPEED, acc= JOG_ACCL)
+                #err = robot.StartJOG(0, 4, 0, 180, vel=JOG_SPEED, acc =  JOG_ACCL)
                 if err == 0:
                     index = 5
             except:
                 print("Error in rotating joint 4")
         if(index == -1):
             return
-        
         stop_thread = Thread(target=stopAxis, args=[robot, joystick, index, lock])
-        # stop_thread.daemon = True
         stop_thread.start()
         time.sleep(.25)
-        # robot.ImmStopJOG()
+        # robot.ServoMoveEnd()
 
     
 def stopAxis(robot, joystick, JSAxel_index, lock):
@@ -205,37 +209,28 @@ def stopAxis(robot, joystick, JSAxel_index, lock):
         # print(axel)
         if(JSAxel_index < 4):
             if abs(axel) < 0.1:
-                err = robot.ImmStopJOG()
-                print(f"Stop jog err: {err}")
-                while(err != 0):
-                    time.sleep(0.1)
-                    print("ERROR in stopping robot!!!")
-                    err = robot.ImmStopJOG()
-                return
-                """
                 try:
-                    robot.ImmStopJOG()
+                    robot.ServoMoveEnd()
                     print("Joystick released")
                 except:
                     print("ERROR in stopping robot!!!")
-                break"""
+                break
         else:
              if abs(axel) >= 1:
-                err = robot.ImmStopJOG()
-                while(err != 0):
-                    time.sleep(0.1)
+                try:
+                    robot.ServoMoveEnd()
+                    print("Joystick released")
+                except:
                     print("ERROR in stopping robot!!!")
-                    err = robot.ImmStopJOG()
-                return
-
+                break
         if checkJointLimits(robot, lock):
-            err = robot.ImmStopJOG()
-            while(err != 0):
-                time.sleep(0.1)
+            try:
+                robot.ServoMoveEnd()
+                print("Too close to soft limit")
+            except:
                 print("ERROR in stopping robot!!!")
-                err = robot.ImmStopJOG()
-            return
-        time.sleep(0.1)
+            break
+        time.sleep(0.008)
 
 def ResetErrors(robot):
     print("Error reset activated")
@@ -244,15 +239,53 @@ def ResetErrors(robot):
     if(err !=  0):
         print("Robot broke safety conditions. Please check WebApp for error msg")
 
-def Pick(robot):
+
+def togglePick(robot):
+    global pick_running
+    pick_running = not pick_running
+    if pick_running:
+        print("Starting Pick loop")
+        Thread(target=runPickLoop, args=(robot,)).start()
+
+def runPickLoop(robot):
+    print("in run PickLoop")
+    global pick_running
+    gripperOpen = True
+    while pick_running:
+        Pick(robot, gripperOpen)
+        time.sleep(0.5)  # Adjust timing to avoid overwhelming the system
+
+
+def Pick(robot, gripperOpen):
+    print("In Pick Func")
+    if not gripperOpen:
+        gripperOpen = toggleGripper(robot, gripperOpen)
     robot.MoveJ(MID_POS, 0, 0)
-    time.sleep(3)
+    time.sleep(.5)
     robot.MoveJ(PICK_POS, 0, 0)
-    time.sleep(0.5)
+    time.sleep(.5)
+    gripperOpen = toggleGripper(robot, gripperOpen)
+    time.sleep(.5)
+    robot.MoveJ(MID_POS, 0, 0)
+    time.sleep(.5)
+    robot.MoveJ(PLACE_POS, 0, 0)
+    time.sleep(.5)
+    gripperOpen = toggleGripper(robot, gripperOpen)
+    time.sleep(.5)
+    robot.MoveJ(MID_POS, 0, 0)
+    time.sleep(.5)
+
+def toggleSpeed(robot, double, speed):
+    if double:
+        robot.SetSpeed(2*speed)
+
 
 def run(robot, robot_speed):
     gripperOpen = True
-    is_moving = False
+    double = False
+    inMotion = False
+    global pick_running
+    pick_running = False
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     screen.fill("purple")
@@ -264,6 +297,7 @@ def run(robot, robot_speed):
     # joysticks = []
     axis = [0, 0, 0, 0, 0, 0]
     straxis = "0,0,0,0,"
+    inMotion = False
     while running:
         pygame.joystick.init()
         joystick_count = pygame.joystick.get_count()
@@ -291,31 +325,52 @@ def run(robot, robot_speed):
         # print(i for i in pygame.event.get() if i.type == pygame.JOYAXISMOTION)
         # print(joystick_count)
         for event in pygame.event.get():
+           
             if event.type == pygame.JOYBUTTONDOWN:
                 if event.button == 0:
                     print("A Has Been Pressed")
-                    Pick(robot)
-                    time.sleep(3)
-                    # gripperOpen = toggleGripper(robot, gripperOpen)
+                    gripperOpen = toggleGripper(robot, gripperOpen)
                 elif event.button == 1:
                     print("B Has Been Pressed")
-                    # robot.MoveJ(HOME_POS, 0, 0)
-                    time.sleep(3)
+                    time.sleep(1)
                 elif event.button == 3:
                     print("Y Has Been Pressed")
-                    ResetErrors(robot)
+                    # togglePick(robot)
+                    
+                    #Pick(robot, gripperOpen=gripperOpen)
                 elif event.button == 2:
-                    # print("X Has Been Pressed")
-                    # robot.MoveJ(PACKING_POS, 0, 0)
+                    print("X Has Been Pressed")
+                    ResetErrors(robot)
                     time.sleep(3)
+
+            elif event.type == pygame.JOYBUTTONUP:
+                if event.button == 0:
+                    print("A Has Been Uped")
+                elif event.button == 1:
+                    print("B Has Been Uped")
+                elif event.button == 3:
+                    print("Y Has Been Uped")
+                elif event.button == 2:
+                    print("X Has Been Uped")
+
             
             elif event.type == pygame.JOYAXISMOTION:
-                if(is_moving and checkNeutralPos(joystick)):
-                    is_moving = False
-                elif(is_moving):
-                    continue
                 # joystick_s = pygame.joystick.Joystick(0)
+                if inMotion and checkNeutralPos(joystick):
+                    try:
+                        err = robot.ServoMoveEnd()
+                        while err != 0:
+                            time.sleep(0.1)
+                            err = robot.ServoMoveEnd()
+                    except:
+                        print("Error stopping jog")   
+                    inMotion = False
+                elif inMotion:
+                    continue
                 axes = joystick.get_numaxes()
+
+                error = robot.ServoMoveStart()
+                
                 # up, left, down, right
                 straxis = ""
                 fl_axis = []
@@ -329,72 +384,72 @@ def run(robot, robot_speed):
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_RIGHT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 if(fl_axis[0] < -.7):
                     print("L-Left")
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_LEFT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[1] > .7):
                     print('L back')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_DOWN])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[1] < -.7):
                     print('L Forward')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, L_UP])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[2] > 0.7):
                     print('R Right')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_RIGHT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[2] < -0.7):
                     print('R left')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_LEFT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[3] > 0.7):
                     print('R Back')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_UP])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[3] < -0.7):
                     print('R Forward')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, R_DOWN])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[4] > 0):
                     print('lt')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, LT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
+                    inMotion = True
                 elif(fl_axis[5] > 0):
                     print('rt')
                     # moveAxisThread(robot, lock, joystick, 'rt')
                     mv_thread = Thread(target=moveAxisThread, args=[robot, lock, joystick, RT])
                     #mv_thread.daemon = True
                     mv_thread.start()
-                    is_moving = True
-                
-                elif(is_moving and checkNeutralPos(joystick)):
-                    err = robot.ImmStopJOG()
-                    while(err != 0):
-                        time.sleep(0.1)
-                        print("ERROR in stopping robot!!!")
-                        err = robot.ImmStopJOG()
-                    is_moving = False
+                    inMotion = True
+                elif inMotion and checkNeutralPos(joystick):
+                    try:
+                        err = robot.ServoMoveEnd()
+                        while err != 0:
+                            time.sleep(0.1)
+                            err = robot.ServoMoveEnd()
+                    except:
+                        print("Error stopping jog")    
+                    inMotion = False
                 time.sleep(0.008)
-                # print(straxis)
             if event.type == pygame.QUIT:
                 running = False
                 pygame.quit()
@@ -419,23 +474,53 @@ def main():
             time.sleep(0.5)
     while not robot_connected:
         try:
-            robot = Robot.RPC(ROBOT_IP)
+            robot = Robot.RPC('192.168.57.2')
             robot_connected = True
             break
         except:
             time.sleep(0.5)
             robot_connected = robot.connected
     time.sleep(3)
-    #print(robot.GetGripperConfig())
-    print(robot.SetGripperConfig(4,0,0,0))
+    ret = robot.SetGripperConfig(4,0)
+    print("Gripper error code", ret)
+    time.sleep(1)
+    # Set collision level  here
+    config = robot.GetGripperConfig()
+    print("Getting the gripper config", config)
+
+    err = robot.ActGripper(1,0)
+    print("Activating gripper eroor code", err)
+
+    err = robot.ActGripper(1,1)
     time.sleep(.5)
+    # robot.setOacc
+    error = robot.SetAnticollision(0,[9,9,9,9,9,9],0)
     #robot.ActGripper(1,1)
-    robot_speed = 15
-    accel = 5
+    robot_speed = 50
+    ResetErrors(robot)
+    time.sleep(1)
     robot.SetSpeed(robot_speed)
+    jpos = robot.GetActualTCPPose()[1]
+    print(jpos)
+    jpos[0] -= 100
+    print(jpos)
+    print("error: ", robot.MoveL(jpos, user=0, tool=0, vel=20, acc=20))
+    jpos = robot.GetActualTCPPose()[1]
+    print(jpos)
+    return
+
+    for i in range(1, 10):
+        jpos = robot.GetActualTCPPose()[1]
+        print(jpos)
+        jpos[0] += 5*i
+        print("error: ", robot.MoveL(jpos, 0, 0, blendR=100))
+        print(robot.GetActualTCPPose()[1])
+        time.sleep(1)
+    return
     run_thread = Thread(target = run, args=[robot, robot_speed])
     # run_thread.daemon = True
     run_thread.run()
+
 
 if __name__ == "__main__":
     main()
