@@ -16,6 +16,10 @@ SOFT_LIMIT = [-175.0, 175.0, -265.0, 85.0, -160.0
               , 160.0, -265.0, 85.0, -175.0, 175.0, -175.0, 175.0]
 
 
+JOG_THRESHHOLD = 4
+JOINT_THRESHHOLD = 2
+
+
 
 HOME_POS = [96.617, -62.322, 57.25, -88.757, -92.273, 25.385] 
 PICK_POS = [115.0, -39.834, 56.094, -107.309, -92.277 , 25.383]
@@ -292,19 +296,19 @@ def run(robot, robot_speed):
         # print(joystick_count)
         for event in pygame.event.get():
             if event.type == pygame.JOYBUTTONDOWN:
-                if event.button == 0:
+                if event.button == 0: # GRAB FROM MID_POS
                     print("A Has Been Pressed")
                     Pick(robot)
                     time.sleep(3)
                     # gripperOpen = toggleGripper(robot, gripperOpen)
-                elif event.button == 1:
+                elif event.button == 1: #SLEEP?
                     print("B Has Been Pressed")
                     # robot.MoveJ(HOME_POS, 0, 0)
                     time.sleep(3)
-                elif event.button == 3:
+                elif event.button == 3: #RESET ROBOT ERRORS
                     print("Y Has Been Pressed")
                     ResetErrors(robot)
-                elif event.button == 2:
+                elif event.button == 2: #PSYCH
                     # print("X Has Been Pressed")
                     # robot.MoveJ(PACKING_POS, 0, 0)
                     time.sleep(3)
