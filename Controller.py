@@ -30,8 +30,8 @@ place_dict = {
 }
 
 MIDPOINT = [-14.05,-82.72,99.93,-104.53,-88.67,-20.8]
-POINT1 = [-34.9,-72.7,90.17,-102.44,-92.39,-39.95]
-POINT2 = [13.6,-72.7,90.94,-104.11,-94.17,0.69]
+POINT1 = [-38.2,-76.35,97.28,-109.57,-87.87,-49.99]
+POINT2 = [12.67,-75.5,96.81,-111.71,-93.84,-0.01]
 HOME = [-9.54,-80.59,74.67,-81.7,-92.29,-10.86]
 
 MIDPOINT_UP = []
@@ -45,7 +45,7 @@ TARGET2 = POINT2
 JOG_ACCL = 100
 JOG_SPEED = 100
 incr = 1.0
-THRESHOLD = 0.7
+THRESHOLD = 0.3
 
 SOFT_LIMIT = [-160.0, 160.0, -250.0, 70.0, -145.0,
               145.0, -250.0, 70.0, -160.0, 160.0, -160.0, 160.0]
@@ -124,18 +124,30 @@ def getServoCommand(mv_input):
     elif mv_input == RT: delta[3] = 0
     return delta
 
+def getDelta(mv_input):
+    DELTA = [0,0,0,0,0,0,0] #DELTA SERVO CART
+    # targetC = robot.getForwardKin(targetJ)[1] #CARTESIAN COORDINATES
+    thresh = 0.3
+    #calculate delta in cartesian coordinates
+    #d = incr * (mv_input[] - thresh)/thresh
+
+    DELTA[ 0 ]  = ( mv_input[ 0 ] * -incr ) if abs( mv_input[ 0 ]) > 0.3 else 0.0
+    DELTA[ 1 ]  = ( mv_input[ 1 ] * incr ) if abs( mv_input[ 1 ]) > 0.3 else 0.0
+    DELTA[ 2 ]  = ( mv_input[ 3 ] * incr ) if abs( mv_input[ 3 ]) > 0.3 else 0.0
+    DELTA[ 3 ]  = ( mv_input[ 4 ] * 0.00 ) if abs( mv_input[ 4 ]) > 0.3 else 0.0
+    DELTA[ 4 ]  = ( mv_input[ 2 ] * -incr ) if abs( mv_input[ 2 ]) > 0.65 else 0.0
+    return DELTA
+    
+
 def getJoystickCommand(axes):
-    #
-    # print(f"Axes being detected: {axes}")
-    if axes[0] > THRESHOLD: return L_RIGHT
-    if axes[0] < -THRESHOLD: return L_LEFT
-    if axes[1] > THRESHOLD: return L_DOWN
-    if axes[1] < -THRESHOLD: return L_UP
-    if axes[2] > THRESHOLD: return R_RIGHT
-    if axes[2] < -THRESHOLD: return R_LEFT
-    if axes[3] > THRESHOLD: return R_UP
-    if axes[3] < -THRESHOLD: return R_DOWN
-    return None
+    DEAD_ZONE = 0.15  # Ignore small axis values
+    if abs(axes[0]) > THRESHOLD: return L_RIGHT if axes[0] > 0 else L_LEFT
+    if abs(axes[1]) > THRESHOLD: return L_DOWN if axes[1] > 0 else L_UP
+    if abs(axes[2]) > THRESHOLD: return R_RIGHT if axes[2] > 0 else R_LEFT
+    if abs(axes[3]) > THRESHOLD: return R_UP if axes[3] > 0 else R_DOWN
+    if all(abs(axis) < DEAD_ZONE for axis in axes):
+        return None
+    return None  # Default to None to stop motion
 
 def toggleGripper(robot, state):
     global gripper_open, gripper_pos
@@ -202,32 +214,80 @@ def CalculateZoffset(robot, Jpose, up = 1):
     else:
         tcp_new[2] -= 60
     
-    print(tcp_new)
+    #print(tcp_new)
     err, x = robot.GetInverseKin(type=0, desc_pos=tcp_new, config=-1)
-    print(err, x, tcp_new)
+    #print(err, x, tcp_new)
     return(x)
 
 def Pick(robot):
-    global POINT1, POINT2, MIDPOINT, POINT1_UP, POINT2_UP, MIDPOINT_UP, gripper_open
+    global POINT1, POINT2, MIDPOINT, POINT1_UP, POINT2_UP, MIDPOINT_UP, gripper_open, stop_pick
+    if stop_pick.is_set():
+        print("Pick Loop interrupted!")
+        return
+    try:
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before POINT1_UP!")
+            return
+        robot.MoveJ(POINT1_UP, 0, 0)
 
-    robot.MoveJ(POINT1_UP, 0, 0)
-    robot.MoveJ(POINT1, 0, 0)
-    gripper_open = toggleGripper(robot, gripper_open)
-    gripper_open = toggleGripper(robot, gripper_open)
-    robot.MoveJ(POINT1_UP, 0, 0)
-    robot.MoveJ(POINT2_UP, 0, 0)
-    robot.MoveJ(POINT2, 0, 0)
-    gripper_open = toggleGripper(robot, gripper_open)
-    gripper_open = toggleGripper(robot, gripper_open)
-    robot.MoveJ(POINT2_UP, 0, 0)
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before POINT1!")
+            return
+        robot.MoveJ(POINT1, 0, 0)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before first toggleGripper!")
+            return
+        gripper_open = toggleGripper(robot, gripper_open)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before second toggleGripper!")
+            return
+        gripper_open = toggleGripper(robot, gripper_open)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before POINT1_UP return!")
+            return
+        robot.MoveJ(POINT1_UP, 0, 0)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before POINT2_UP!")
+            return
+        robot.MoveJ(POINT2_UP, 0, 0)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before POINT2!")
+            return
+        robot.MoveJ(POINT2, 0, 0)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before third toggleGripper!")
+            return
+        gripper_open = toggleGripper(robot, gripper_open)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before fourth toggleGripper!")
+            return
+        gripper_open = toggleGripper(robot, gripper_open)
+
+        if stop_pick.is_set():
+            print("Pick Loop interrupted before final POINT2_UP!")
+            return
+        robot.MoveJ(POINT2_UP, 0, 0)
+    except Exception as e:
+        print(f"Error in Pick Loop: {e}")
+        return
 
 def runPickLoop(robot, event):
     global pick_running, gripper_open
-    
-    while not event.is_set():
-        Pick(robot)
-        time.sleep(0.5)
-
+    try:
+        while not event.is_set():
+            Pick(robot)
+            time.sleep(0.5)  # Non-interruptible sleep
+    except Exception as e:
+        print(f"Error in Pick Loop: {e}")
+    finally:
+        pick_running = False
 
 def togglePick(robot):
     global pick_running, pick_thread, gripper_open, stop_pick
@@ -236,21 +296,31 @@ def togglePick(robot):
 
     if pick_running:
         print("Going MIDPOINT")
-        if not gripper_open:
-            gripper_open = toggleGripper(robot, gripper_open)
-            time.sleep(.5)
-        GoTO(robot, MIDPOINT)
-        print("Starting Pick loop")
-        stop_pick = Event()
-        pick_thread = Thread(target=runPickLoop, args=(robot, stop_pick,))
-        pick_thread.start()
+        try:
+            if not gripper_open:
+                gripper_open = toggleGripper(robot, gripper_open)
+                time.sleep(0.8)  # Non-interruptible sleep
+            GoTO(robot, MIDPOINT)
+            print("Starting Pick loop")
+            stop_pick = Event()
+            pick_thread = Thread(target=runPickLoop, args=(robot, stop_pick,))
+            pick_thread.start()
+        except Exception as e:
+            print(f"Failed to start Pick loop: {e}")
+            pick_running = False
+            stop_pick = None
     else:
         print("Stopping Pick loop")
-        pick_running = False
-        if stop_pick:
-            stop_pick.set()
-        if pick_thread and pick_thread.is_alive():
-            pick_thread.join()
+        try:
+            if stop_pick:
+                stop_pick.set()
+            if pick_thread and pick_thread.is_alive():
+                pick_thread.join()
+        except Exception as e:
+            print(f"Error stopping Pick loop: {e}")
+        finally:
+            stop_pick = None
+            pick_thread = None
 
 def GoTO(robot, P1):
     global gripper_open
@@ -259,6 +329,7 @@ def GoTO(robot, P1):
     robot.MoveJ(P1_UP, 0, 0)
     robot.MoveJ(P1, 0, 0)
     gripper_open = toggleGripper(robot, gripper_open)
+    time.sleep(0.8)
     robot.MoveJ(P1_UP, 0, 0)
 
 def Assess(value):
@@ -271,136 +342,158 @@ def Assess(value):
     elif abs(value - 69) < 2:
         return 'H'
 
-
 def PickDiffBalls(robot):
+    global gripper_open
     place_seq = ['P', 'G', 'S', 'H']
     pick_seq = [1, 2, 3, 4]
+    if not gripper_open:
+            gripper_open = toggleGripper(robot, gripper_open)
+            time.sleep(.8)
     for index in range(4):
         if stop_db_event.is_set():  # Check if stop was requested
             print("PickDiffBalls interrupted!")
-            break
-        GoTO(robot, pick_dict[pick_seq[index]])
-        robot.MoveJ(HOME, 0, 0)
-        time.sleep(2)
-        val = runLuaScript(robot)
-        ball = Assess(val)
-        print(ball)
-        GoTO(robot, place_dict[ball])
-        robot.MoveJ(HOME, 0, 0)
-
+            return  # Exit gracefully
+        try:
+            GoTO(robot, pick_dict[pick_seq[index]])
+            robot.MoveJ(HOME, 0, 0)
+            time.sleep(2)
+            val = runLuaScript(robot)
+            ball = Assess(val)
+            print(f"Assessed ball: {ball}")
+            GoTO(robot, place_dict[ball])
+            robot.MoveJ(HOME, 0, 0)
+        except Exception as e:
+            print(f"Error in PickDiffBalls: {e}")
+            return 
 
 def runDiffBallsLoop(robot):
     global db_running
-    PickDiffBalls(robot)
-    db_running = False  # Reset state after one run
-
+    try:
+        PickDiffBalls(robot)
+    except Exception as e:
+        print(f"Error in runDiffBallsLoop: {e}")
+    finally:
+        db_running = False  
 
 def toggleDiffBalls(robot):
     global db_running, db_thread, stop_db_event
 
     if not db_running:
         print("Starting All Diff Balls loop")
-        stop_db_event = Event()
-        db_running = True
-        db_thread = Thread(target=runDiffBallsLoop, args=(robot,))
-        db_thread.start()
+        try:
+            stop_db_event = Event()  
+            db_running = True
+            db_thread = Thread(target=runDiffBallsLoop, args=(robot,))
+            db_thread.start()
+        except Exception as e:
+            print(f"Failed to start thread: {e}")
+            db_running = False
+            stop_db_event = None
     else:
         print("Stopping All Diff Balls loop")
-        db_running = False
-        if stop_db_event:
-            stop_db_event.set()
-        if db_thread and db_thread.is_alive():
-            db_thread.join()
+        try:
+            db_running = False
+            if stop_db_event:
+                stop_db_event.set()  # Signal thread to stop
+            if db_thread and db_thread.is_alive():
+                db_thread.join()  # Wait for thread to terminate
+        except Exception as e:
+            print(f"Error stopping thread: {e}")
+        finally:
+            # Clean up global state
+            stop_db_event = None
+            db_thread = None
 
+def motion_execution(robot, joy, initial_axes, stop_event):
+    initial_cmd = getJoystickCommand(initial_axes)
+    if not initial_cmd:
+        return
+    print(f"Starting motion with command: {initial_cmd}")
 
+    robot.ServoMoveStart()
+    try:
+        current_cmd = initial_cmd
+        while not stop_event.is_set():
+            # Poll joystick axes
+            axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
+            print(axes)
+            current_cmd = getJoystickCommand(axes)
 
-def motion_execution(robot, joy, initial_cmd, stop_event):
-    print("In motion execution")
-    if not initial_cmd: return
+            # Stop if joystick is neutral
+            if current_cmd is None:
+                print("Joystick neutral, stopping motion")
+                break
 
+            # Apply motion for the current command
+            delta = getServoCommand(current_cmd)
+            #print(f"Delta basic : {delta}")
 
-    while not stop_event.is_set():
-        # Poll joystick axes continuously
-        # axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
-        # cmd = getJoystickCommand(axes)
-        # if cmd != initial_cmd:
-        #     print(f"Stopping motion due to change or release: {cmd}")
-        
-        delta = getServoCommand(initial_cmd)
-        robot.ServoMoveStart()
-        print("Servo command started")
+            diag = getDelta(axes)
+            #print(f"Delta Diagonal : {diag}")
 
-        currentTCP = robot.GetActualTCPPose()[1]
-        futureTCP = [currentTCP[i] + delta[i] for i in range(6)]
-        futureJ = robot.GetInverseKin(type=0, desc_pos=futureTCP, config=-1)[1]
+            currentTCP = robot.GetActualTCPPose()[1]
+            futureTCP = [currentTCP[i] + delta[i] for i in range(6)]
+            futureJ = robot.GetInverseKin(type=0, desc_pos=futureTCP, config=-1)[1]
 
-        if checkJointLimits(futureJ):
-            robot.ServoCart(2, delta, vel=JOG_SPEED, acc=JOG_ACCL)
-        else:
-            break
+            if checkJointLimits(futureJ):
+                pass
+                #robot.ServoCart(2, diag, vel=JOG_SPEED, acc=JOG_ACCL)
+            else:
+                print("Joint limit reached, stopping motion")
+                break
 
-        time.sleep(0.008)
-
-    print("Ending Servo movement")
-    robot.ServoMoveEnd()
-
+            time.sleep(0.008)  # Tight loop for responsive control
+    finally:
+        robot.ServoMoveEnd()
+        print("Motion execution ended")
 
 def joystick_input_thread(robot, joy):
-    print("Accepting JoyStick Input")
+    print("Accepting Joystick Input (Buttons and Initial Motion)")
     global joystick_cmd, motion_thread, motion_stop_event, gripper_open
-    last_cmd = None
     button_states = [False] * 10
 
     while not stop_flag.is_set():
-        #print("..")
-        axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
+        # Poll buttons only
         buttons = [joy.get_button(i) for i in range(10)]
 
-        cmd = getJoystickCommand(axes)
-        # with cmd_lock:
-        #     joystick_cmd = cmd
+        # Check for new motion only if no motion thread is running
+        if not (motion_thread and motion_thread.is_alive()):
 
-        # Start/stop motion thread for axis input
-        #print(cmd)
-        # Always stop motion if no command is present
-        # Start/stop motion thread for axis input
-        if cmd != last_cmd:
-            print("command != last command")
-            if motion_thread and motion_thread.is_alive():
-                print("Stopping previous motion and waiting for thread to join")
-                motion_stop_event.set()
-                motion_thread.join()
-            if cmd:
-                print("New thread")
+            axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
+            with cmd_lock:
+                AXES = axes
+                joystick_cmd = getJoystickCommand(AXES)
+            if joystick_cmd:
+                print(f"Starting new motion thread with command: {joystick_cmd}")
                 motion_stop_event = Event()
-                motion_thread = Thread(target=motion_execution, args=(robot, joy, cmd, motion_stop_event))
+                motion_thread = Thread(target=motion_execution, args=(robot, joy, AXES, motion_stop_event))
                 motion_thread.start()
-            last_cmd = cmd
 
-
-
-        # Button actions (one-shot)
+        # Handle button presses
         for i in range(len(buttons)):
             if buttons[i] and not button_states[i]:
-                print(i)
+                print(f"Button {i} pressed")
                 if i == 0:  # A
                     gripper_open = toggleGripper(robot, gripper_open)
                 elif i == 1:  # B
                     togglePick(robot)
                 elif i == 2:  # X
                     toggleDiffBalls(robot)
+                elif i == 3:  # Y
+                    robot.MoveJ(HOME, 0, 0)
                 elif i == 4:  # LB
                     closeGripper(robot)
                 elif i == 5:  # RB
                     openGripper(robot)
                 elif i == 8:
                     ResetErrors(robot)
-                elif i ==9:
+                elif i == 9:
                     err, Jpose = robot.GetActualJointPosDegree()
                     writetocsv(Jpose)
             button_states[i] = buttons[i]
 
-        time.sleep(0.02)
+        time.sleep(0.01)  # Slower polling for buttons
+
 
 def run(robot, robot_speed):
     global stop_flag
