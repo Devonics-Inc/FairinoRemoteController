@@ -4,6 +4,7 @@ import os
 import csv
 import msvcrt
 import numpy as np
+import threading
 from threading import Thread, Lock, Event
 
 sys.path.insert(0, '/Users/FrTest/Desktop/FrController')
@@ -11,28 +12,29 @@ from fairino import Robot
 
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
 
+
 csv_file = "coordinates.csv"
 
 gripper_pos = 100
 
 pick_dict = {
-    1 : [-60.58,-86.81,104.51,-107.38,-92.29,-60.96],
-    2 : [-79.15,-99.21,115.95,-105.3,-92.3,-80.08],
-    3 : [-105.74,-104.74,121.23,-103.26,-91.19,-105.64],
-    4 : [-128.65,-101.9,119.44,-104.68,-91.46,-125.14]
+    1 : [-63.16,-88.4,107.05,-108.65,-90.0,-63.16],
+    2 : [-82.42,-102.49,119.18,-106.69,-90.0,-82.42],
+    3 : [-107.69,-110.2,126.51,-106.3,-90.0,-107.69],
+    4 : [-130.48,-107.0,124.62,-107.61,-90.0,-130.48]
 }
 
 place_dict = {
-    'P' : [82.65,-103.32,118.96,-103.44,-87.52,81.23],
-    'G' : [66.38,-98.67,114.01,-98.0,-92.76,62.26],
-    'S' : [48.31,-92.6,112.4,-105.1,-94.33,44.22],
-    'H' : [36.08,-80.17,97.94,-103.81,-94.88,31.96]
+    'P' : [86.34,-103.66,121.54,-107.88,-90.0,86.34],
+    'G' : [63.45,-107.31,122.09,-104.78,-90.0,63.45],
+    'S' : [44.42,-98.82,118.52,-109.7,-90.0,44.42],
+    'H' : [31.86,-85.87,104.64,-108.78,-90.0,31.86]
 }
 
-MIDPOINT = [-14.05,-82.72,99.93,-104.53,-88.67,-20.8]
-POINT1 = [-38.2,-76.35,97.28,-109.57,-87.87,-49.99]
-POINT2 = [12.67,-75.5,96.81,-111.71,-93.84,-0.01]
-HOME = [-9.54,-80.59,74.67,-81.7,-92.29,-10.86]
+MIDPOINT = [-13.52,-85.44,103.75,-108.31,-90.0,-13.52]
+POINT1 = [-37.65,-76.45,98.0,-111.55,-90.0,-37.65]
+POINT2 = [10.44,-76.51,97.89,-111.38,-90.0,10.44]
+HOME = [-10.14,-81.78,77.05,-85.27,-90.0,-10.14]
 
 MIDPOINT_UP = []
 POINT1_UP = []
@@ -49,6 +51,8 @@ THRESHOLD = 0.3
 
 SOFT_LIMIT = [-160.0, 160.0, -250.0, 70.0, -145.0,
               145.0, -250.0, 70.0, -160.0, 160.0, -160.0, 160.0]
+
+SAFE_CART_LIMITS = [-474, 111, -365, 302, 26, 225, 150, 184, -74, 74, 45, 135]
 
 L_LEFT = 'll'; L_RIGHT = 'lr'; L_UP = 'lu'; L_DOWN = 'ld'
 R_LEFT = 'rl'; R_RIGHT = 'rr'; R_UP = "ru"; R_DOWN = "rd"
@@ -72,6 +76,10 @@ stop_db_event = None
 db_running = False
 db_thread = None
 
+drop_running = False
+drop_thread = None
+stop_drop_event = None
+
 def runLuaScript(robot):
     robot.Mode(0) #Robot cuts to autorun mode
     ret = robot.ProgramLoad('/fruser/testinglua.lua') #Load the robot program to be executed, the testPTP.lua program needs to be written first on the webapp
@@ -87,7 +95,7 @@ def writetocsv(coordinate):
     try:
             with open(csv_file, 'a', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['J1', 'J2', 'J3', 'J4', 'J5', 'J6'])  # Write header row
+                csv_writer.writerow(['X', 'Y', 'Z', 'RX', 'RY', 'RZ'])  # Write header row
                 csv_writer.writerow(round(num, 2) for num in coordinate)  # Write coordinate data
             print(f"Coordinates saved to '{csv_file}' successfully.")
     except Exception as e:
@@ -104,6 +112,19 @@ def checkJointLimits(j_pos):
             print("Error - Approaching joint limit!")
             return False
     return True
+
+def CheckSafetyPlanes(tcpPose):
+    violations = [None] * 6  # None (no violation), 'min' (at min limit), or 'max' (at max limit)
+    for i in range(len(tcpPose)):
+        if i == 3:
+            tcpPose[i] = abs(tcpPose[i])
+        if tcpPose[i] <= SAFE_CART_LIMITS[i * 2] + 1:
+            print(f"Approaching or beyond min Cartesian limit for axis {i}: {tcpPose[i]} <= {SAFE_CART_LIMITS[i * 2]}")
+            violations[i] = 'min'
+        elif tcpPose[i] >= SAFE_CART_LIMITS[i * 2 + 1] - 1:
+            print(f"Approaching or beyond max Cartesian limit for axis {i}: {tcpPose[i]} >= {SAFE_CART_LIMITS[i * 2 + 1]}")
+            violations[i] = 'max'
+    return violations
 
 def ResetErrors(robot):
     print("Error reset activated")
@@ -132,10 +153,10 @@ def getDelta(mv_input):
     #d = incr * (mv_input[] - thresh)/thresh
 
     DELTA[ 0 ]  = ( mv_input[ 0 ] * -incr ) if abs( mv_input[ 0 ]) > 0.3 else 0.0
-    DELTA[ 1 ]  = ( mv_input[ 1 ] * incr ) if abs( mv_input[ 1 ]) > 0.3 else 0.0
+    DELTA[ 1 ]  = ( mv_input[ 1 ] * -incr ) if abs( mv_input[ 1 ]) > 0.3 else 0.0
     DELTA[ 2 ]  = ( mv_input[ 3 ] * incr ) if abs( mv_input[ 3 ]) > 0.3 else 0.0
     DELTA[ 3 ]  = ( mv_input[ 4 ] * 0.00 ) if abs( mv_input[ 4 ]) > 0.3 else 0.0
-    DELTA[ 4 ]  = ( mv_input[ 2 ] * -incr ) if abs( mv_input[ 2 ]) > 0.65 else 0.0
+    DELTA[ 4 ]  = ( mv_input[ 2 ] * 0.00 ) if abs( mv_input[ 2 ]) > 0.65 else 0.0
     return DELTA
     
 
@@ -154,11 +175,11 @@ def toggleGripper(robot, state):
     if not state:
         gripper_pos = 100
         print("Opening gripper")
-        robot.MoveGripper(1, 100, 100, 30, 30000, 0)
+        robot.MoveGripper(1, 100, 100, 30, 30000,0,0,0,0,0)
     else:
         gripper_pos = 50
         print("Closing gripper")
-        robot.MoveGripper(1, 0, 100, 30, 30000, 0)
+        robot.MoveGripper(1, 0, 100, 30, 30000,0,0,0,0,0)
     time.sleep(.8)
     gripper_open = not state
     return not state
@@ -167,7 +188,7 @@ def openGripper(robot):
     global gripper_pos, gripper_open
     gripper_open = True
     gripper_pos = 100
-    robot.MoveGripper(1, 100, 100, 30, 30000, 0)
+    robot.MoveGripper(1, 100, 100, 30, 30000,0,0,0,0,0)
 
 def closeGripper(robot):
     global gripper_pos, gripper_open
@@ -175,7 +196,7 @@ def closeGripper(robot):
     print("Closing gripper")
     gripper_pos -= 10
     if gripper_pos <= 40: gripper_pos = 40
-    robot.MoveGripper(1, gripper_pos, 100, 30, 30000, 0)
+    robot.MoveGripper(1, gripper_pos, 100, 30, 30000,0,0,0,0,0,0)
 
 def SaveTarget1(robot):
     global TARGET1
@@ -207,7 +228,9 @@ def CalculateMid(robot):
     MID_POS = robot.GetInverseKin(type=0, desc_pos=midpos, config=-1)[1]
 
 def CalculateZoffset(robot, Jpose, up = 1):
+    print(robot.GetForwardKin(Jpose))
     err, tcp = robot.GetForwardKin(Jpose)
+    print(tcp)
     tcp_new = tcp
     if up :
         tcp_new[2] += 60
@@ -228,12 +251,12 @@ def Pick(robot):
         if stop_pick.is_set():
             print("Pick Loop interrupted before POINT1_UP!")
             return
-        robot.MoveJ(POINT1_UP, 0, 0)
+        robot.MoveJ(POINT1_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
         if stop_pick.is_set():
             print("Pick Loop interrupted before POINT1!")
             return
-        robot.MoveJ(POINT1, 0, 0)
+        robot.MoveJ(POINT1, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
         if stop_pick.is_set():
             print("Pick Loop interrupted before first toggleGripper!")
@@ -248,17 +271,17 @@ def Pick(robot):
         if stop_pick.is_set():
             print("Pick Loop interrupted before POINT1_UP return!")
             return
-        robot.MoveJ(POINT1_UP, 0, 0)
+        robot.MoveJ(POINT1_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
         if stop_pick.is_set():
             print("Pick Loop interrupted before POINT2_UP!")
             return
-        robot.MoveJ(POINT2_UP, 0, 0)
+        robot.MoveJ(POINT2_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
         if stop_pick.is_set():
             print("Pick Loop interrupted before POINT2!")
             return
-        robot.MoveJ(POINT2, 0, 0)
+        robot.MoveJ(POINT2, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
         if stop_pick.is_set():
             print("Pick Loop interrupted before third toggleGripper!")
@@ -273,7 +296,7 @@ def Pick(robot):
         if stop_pick.is_set():
             print("Pick Loop interrupted before final POINT2_UP!")
             return
-        robot.MoveJ(POINT2_UP, 0, 0)
+        robot.MoveJ(POINT2_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
     except Exception as e:
         print(f"Error in Pick Loop: {e}")
         return
@@ -326,20 +349,20 @@ def GoTO(robot, P1):
     global gripper_open
     P1_UP = CalculateZoffset(robot, P1, up=1)
 
-    robot.MoveJ(P1_UP, 0, 0)
-    robot.MoveJ(P1, 0, 0)
+    robot.MoveJ(P1_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
+    robot.MoveJ(P1, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
     gripper_open = toggleGripper(robot, gripper_open)
     time.sleep(0.8)
-    robot.MoveJ(P1_UP, 0, 0)
+    robot.MoveJ(P1_UP, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
 
 def Assess(value):
     if abs(value - 32) < 2:
         return 'P'
     elif abs(value - 34) < 2:
         return 'G'
-    elif abs(value - 54) < 2:
+    elif abs(value - 54) <= 2:
         return 'S'
-    elif abs(value - 69) < 2:
+    elif abs(value - 69) <= 2:
         return 'H'
 
 def PickDiffBalls(robot):
@@ -355,13 +378,13 @@ def PickDiffBalls(robot):
             return  # Exit gracefully
         try:
             GoTO(robot, pick_dict[pick_seq[index]])
-            robot.MoveJ(HOME, 0, 0)
+            robot.MoveJ(HOME, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
             time.sleep(2)
             val = runLuaScript(robot)
             ball = Assess(val)
             print(f"Assessed ball: {ball}")
             GoTO(robot, place_dict[ball])
-            robot.MoveJ(HOME, 0, 0)
+            robot.MoveJ(HOME, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
         except Exception as e:
             print(f"Error in PickDiffBalls: {e}")
             return 
@@ -404,69 +427,146 @@ def toggleDiffBalls(robot):
             stop_db_event = None
             db_thread = None
 
-def motion_execution(robot, joy, initial_axes, stop_event):
-    initial_cmd = getJoystickCommand(initial_axes)
-    if not initial_cmd:
+
+def DropatLoc(robot):
+    global gripper_open
+    if stop_drop_event and stop_drop_event.is_set():
+        print("DropatLoc interrupted!")
         return
-    print(f"Starting motion with command: {initial_cmd}")
-
-    robot.ServoMoveStart()
     try:
-        current_cmd = initial_cmd
-        while not stop_event.is_set():
-            # Poll joystick axes
-            axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
-            print(axes)
-            current_cmd = getJoystickCommand(axes)
+        currPos = robot.GetActualJointPosDegree()[1]
+        up = CalculateZoffset(robot, currPos, up=1)
+        robot.MoveJ(up, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
+        robot.MoveJ(HOME, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
+        time.sleep(2)
+        val = runLuaScript(robot)
+        ball = Assess(val)
+        print(f"Assessed ball: {ball}")
+        GoTO(robot, place_dict[ball])
+    except Exception as e:
+        print(f"Error in DropatLoc: {e}")
+        return
 
-            # Stop if joystick is neutral
-            if current_cmd is None:
+def runDropatLoc(robot):
+    global drop_running
+    try:
+        DropatLoc(robot)
+    except Exception as e:
+        print(f"Error in runDropatLoc: {e}")
+    finally:
+        drop_running = False
+
+
+def reconfigure_gripper(robot):
+    global gripper_open
+    robot.SetGripperConfig(4, 0)
+    robot.ActGripper(1, 0)
+    robot.ActGripper(1, 1)
+    global gripper_open
+    if not gripper_open:
+        gripper_open = toggleGripper(robot, gripper_open)
+
+
+def motion_execution(robot, joy, stop_event):
+    """
+    Execute continuous motion based on joystick input using getDelta.
+    """
+    print("Starting motion execution")
+    try:
+        robot.ServoMoveStart()
+        while not stop_event.is_set():
+            axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
+            delta = getDelta(axes)
+
+            if all(abs(d) < 0.01 for d in delta[:6]):
                 print("Joystick neutral, stopping motion")
                 break
 
-            # Apply motion for the current command
-            delta = getServoCommand(current_cmd)
-            #print(f"Delta basic : {delta}")
-
-            diag = getDelta(axes)
-            #print(f"Delta Diagonal : {diag}")
-
-            currentTCP = robot.GetActualTCPPose()[1]
-            futureTCP = [currentTCP[i] + delta[i] for i in range(6)]
-            futureJ = robot.GetInverseKin(type=0, desc_pos=futureTCP, config=-1)[1]
-
-            if checkJointLimits(futureJ):
-                pass
-                #robot.ServoCart(2, diag, vel=JOG_SPEED, acc=JOG_ACCL)
-            else:
-                print("Joint limit reached, stopping motion")
+            try:
+                currentTCP = robot.GetActualTCPPose()[1]
+                print(f"Current TCP: {currentTCP}")
+                print(f"Delta: {delta}")
+                
+                violations = CheckSafetyPlanes(currentTCP)
+                
+                # Compute initial future TCP
+                futureTCP = [currentTCP[i] - delta[i] for i in range(6)]
+                
+                # Adjust delta to reflect clamped futureTCP
+                filtered_delta = delta[:]
+                filter_index = [1, 0, 2, 3, 4, 5]
+                # Block motion that worsens violations
+                for i in range(6):
+                    if i == 2:  # Special handling for Z-axis
+                        if violations[i] == 'min' and filtered_delta[filter_index[i]] > 0:  # Block positive delta (moves Z down)
+                            print(f"Blocking downward motion for Z-axis (at min limit)")
+                            filtered_delta[filter_index[i]] = 0
+                        elif violations[i] == 'max' and filtered_delta[filter_index[i]] < 0:  # Block negative delta (moves Z up)
+                            print(f"Blocking upward motion for Z-axis (at max limit)")
+                            filtered_delta[filter_index[i]] = 0
+                    else:  # Other axes (X, Y, RX, RY, RZ)
+                        if violations[i] == 'min' and filtered_delta[filter_index[i]] < 0:
+                            print(f"Blocking negative motion for axis {i} (at min limit)")
+                            filtered_delta[filter_index[i]] = 0
+                        elif violations[i] == 'max' and filtered_delta[filter_index[i]] > 0:
+                            print(f"Blocking positive motion for axis {i} (at max limit)")
+                            filtered_delta[filter_index[i]] = 0
+                
+                print(f"Filtered Delta: {filtered_delta}")
+                # Check joint limits
+                futureJ = robot.GetInverseKin(type=0, desc_pos=futureTCP, config=-1)[1]
+                if checkJointLimits(futureJ):
+                    if any(abs(d) >= 0.01 for d in filtered_delta[:6]):
+                        robot.ServoCart(2, filtered_delta, vel=JOG_SPEED, acc=JOG_ACCL)
+                        print(f"Future TCP: {futureTCP}")
+                    else:
+                        print("No valid motion allowed, skipping ServoCart")
+                else:
+                    print(f"Future TCP: {futureTCP}")
+                    print("Joint limit reached, stopping motion")
+                    stop_event.set()
+                    break
+            except Exception as e:
+                print(f"Robot command error: {e}")
                 break
 
-            time.sleep(0.008)  # Tight loop for responsive control
+            time.sleep(0.01)
+    except Exception as e:
+        print(f"Motion execution error: {e}")
     finally:
-        robot.ServoMoveEnd()
+        try:
+            robot.ServoMoveEnd()
+        except Exception as e:
+            print(f"Error ending servo move: {e}")
         print("Motion execution ended")
-
+        
 def joystick_input_thread(robot, joy):
-    print("Accepting Joystick Input (Buttons and Initial Motion)")
-    global joystick_cmd, motion_thread, motion_stop_event, gripper_open
+    """
+    Poll joystick for inputs, start motion threads based on getDelta, and handle buttons.
+    """
+    print("Accepting Joystick Input")
+    global motion_thread, motion_stop_event, gripper_open, drop_running, drop_thread, stop_drop_event
     button_states = [False] * 10
 
     while not stop_flag.is_set():
-        # Poll buttons only
+        # Poll buttons and axes
         buttons = [joy.get_button(i) for i in range(10)]
+        axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
+        delta = getDelta(axes)
 
-        # Check for new motion only if no motion thread is running
-        if not (motion_thread and motion_thread.is_alive()):
-
-            axes = [truncate(joy.get_axis(i)) for i in range(joy.get_numaxes())]
-            with cmd_lock:
-                AXES = axes
-                joystick_cmd = getJoystickCommand(AXES)
-            if joystick_cmd:
-                print(f"Starting new motion thread with command: {joystick_cmd}")
+        # Manage motion thread
+        if motion_thread and motion_thread.is_alive():
+            # Stop motion if joystick is neutral
+            if all(abs(d) < 0.01 for d in delta[:6]):
+                motion_stop_event.set()
+                motion_thread.join()
+                motion_thread = None
+        else:
+            # Start new motion thread if joystick is active
+            if any(abs(d) >= 0.01 for d in delta[:6]):
+                print("Starting new motion thread")
                 motion_stop_event = Event()
-                motion_thread = Thread(target=motion_execution, args=(robot, joy, AXES, motion_stop_event))
+                motion_thread = Thread(target=motion_execution, args=(robot, joy, motion_stop_event))
                 motion_thread.start()
 
         # Handle button presses
@@ -474,25 +574,48 @@ def joystick_input_thread(robot, joy):
             if buttons[i] and not button_states[i]:
                 print(f"Button {i} pressed")
                 if i == 0:  # A
-                    gripper_open = toggleGripper(robot, gripper_open)
+                    if not drop_running:
+                        print("Starting DropatLoc")
+                        try:
+                            stop_drop_event = Event()
+                            drop_running = True
+                            drop_thread = Thread(target=runDropatLoc, args=(robot,))
+                            drop_thread.start()
+                        except Exception as e:
+                            print(f"Failed to start DropatLoc thread: {e}")
+                            drop_running = False
+                            stop_drop_event = None
+                    else:
+                        print("Stopping DropatLoc")
+                        try:
+                            if stop_drop_event:
+                                stop_drop_event.set()
+                            if drop_thread and drop_thread.is_alive():
+                                drop_thread.join()
+                        except Exception as e:
+                            print(f"Error stopping DropatLoc thread: {e}")
+                        finally:
+                            stop_drop_event = None
+                            drop_thread = None
+                            drop_running = False
                 elif i == 1:  # B
-                    togglePick(robot)
+                    reconfigure_gripper(robot)
                 elif i == 2:  # X
-                    toggleDiffBalls(robot)
+                    gripper_open = toggleGripper(robot, gripper_open)
                 elif i == 3:  # Y
-                    robot.MoveJ(HOME, 0, 0)
+                    robot.MoveJ(HOME, 1, 0, vel = JOG_SPEED, acc = JOG_ACCL)
                 elif i == 4:  # LB
-                    closeGripper(robot)
+                    toggleDiffBalls(robot)
                 elif i == 5:  # RB
-                    openGripper(robot)
-                elif i == 8:
+                    togglePick(robot)
+                elif i == 6:
                     ResetErrors(robot)
-                elif i == 9:
-                    err, Jpose = robot.GetActualJointPosDegree()
-                    writetocsv(Jpose)
+                elif i == 7:
+                    err, pose = robot.GetActualJointPosDegree()
+                    writetocsv(pose)
             button_states[i] = buttons[i]
 
-        time.sleep(0.01)  # Slower polling for buttons
+        time.sleep(0.005)  # Poll frequently for responsiveness
 
 
 def run(robot, robot_speed):
@@ -516,6 +639,7 @@ def run(robot, robot_speed):
     print("Controller connected")
 
     robot.SetSpeed(robot_speed)
+
     poll_thread = Thread(target=joystick_input_thread, args=(robot, joy))
     poll_thread.start()
 
@@ -529,7 +653,6 @@ def run(robot, robot_speed):
     finally:
         print("Shutting down...")
         stop_flag.set()
-        poll_thread.join()
 
         if motion_thread and motion_thread.is_alive():
             motion_stop_event.set()
@@ -542,8 +665,8 @@ def run(robot, robot_speed):
         pygame.display.quit()
         pygame.quit()
 
-
 def main():
+    print("Starting Controller Script")
     global POINT1, POINT2, MIDPOINT, POINT1_UP, POINT2_UP, MIDPOINT_UP
     robot = None
     while not robot:
@@ -555,11 +678,11 @@ def main():
 
     robot_speed = 100
     ResetErrors(robot)
-    CalculateMid(robot)
 
+    MIDPOINT_UP   = CalculateZoffset(robot, MIDPOINT, up=1)
     POINT1_UP   = CalculateZoffset(robot, POINT1, up=1)
     POINT2_UP   = CalculateZoffset(robot, POINT2, up=1)
-    MIDPOINT_UP   = CalculateZoffset(robot, MIDPOINT, up=1)
+    
 
     robot.SetGripperConfig(4, 0)
     robot.ActGripper(1, 0)
@@ -570,6 +693,9 @@ def main():
         
     robot.SetSpeed(robot_speed)
     robot.SetOaccScale(100)
+
+    err, Startpose = robot.GetActualTCPPose()
+    print(f"Starting at position {Startpose}, with error code {err}")
 
     try:
         run(robot, robot_speed)
